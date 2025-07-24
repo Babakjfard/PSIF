@@ -1,5 +1,6 @@
 import numpy as np
 import xarray as xr
+import pandas as pd
 from datetime import datetime
 
 def access_opendap_subset(dataset_url, start_date, end_date, bbox, variables):
@@ -72,10 +73,14 @@ nldas_url = "https://hydro1.gesdisc.eosdis.nasa.gov/dods/NLDAS_FORA0125_H.2.0"
 
 boundary_100km = np.array([-105.25, 39.09, -94.10, 43.90]) # Nebraska
 boundary_wind = boundary_100km - np.array([0.125, 0.125, -0.125, -0.125])
+local_tz = 'America/Chicago'
 
-for year in range(2009, 2010):
+for year in range(2016, 2024):
     start_date = f"{year}-01-29"
-    end_date = f"{year}-02-03"
+    # I added one more day to the end date here, since while time converting the days are pulled 
+    # 6 hours back for CDT local timing. If the location was on the east of UTC the hours would have 
+    # been pushed some hours forward, that extra day would have therefore be one day ahead of the start date
+    end_date = f"{year}-06-04" 
     bounding_box = tuple(boundary_wind)  # (min_lon, min_lat, max_lon, max_lat)
     variables = ['wind_e', 'wind_n']  # 10-m above ground Zonal and Meridional wind speed
     # In new version ugrd --> wind_e (zonal wind), vgrd10m --> wind_n (meridional wind)
@@ -88,6 +93,11 @@ for year in range(2009, 2010):
     # Wind directions
     # ds = nldas_subset
 
+    # Convert to Pandas Series/DatetimeIndex, apply operations, then assign back
+    ds['time'] = pd.to_datetime(ds['time'].values).tz_localize('UTC').tz_convert(local_tz).tz_localize(None)
+
+    print(f"*** Times converted to the local time zone: {local_tz}")
+    
     ugrd_var = "wind_e"
     vgrd_var = "wind_n"
 
@@ -122,11 +132,15 @@ for year in range(2009, 2010):
 
     # Combine all new variables into a new dataset
     daily_ds = xr.Dataset(daily_data_vars, coords={"lat": ds.lat, "lon": ds.lon, "time": ds["time"].resample(time="1D").first()})
+    daily_ds = daily_ds.drop_isel(time=[0, -1]) # Remove the first and last day, since those are not complete days due to time adjustment
 
     # Save the processed dataset to a new NetCDF file (optional)
-    ncd_file = f'../data/daily_wind_Nebraska_statistics_test_{year}.nc'
+    ncd_file = f'data/winds/daily_wind_Nebraska_statistics_{year}.nc'
     daily_ds.to_netcdf(ncd_file)
     print(f'** Successfuly saved daily wind components for {year}-01-29 to {year}-06-03')
 
     print(f"Processing complete. Daily averages and normalized durations have been calculated for {year}.")
+    ds.close()
+    daily_ds.close()
+    
     print('\n\n\n')
